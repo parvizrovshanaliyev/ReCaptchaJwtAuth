@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace ReCaptchaJwtAuth.API.Controllers;
 
 [ApiController]
+[Route("api/[controller]")]
 public class ErrorController : ControllerBase
 {
     private readonly ILogger<ErrorController> _logger;
@@ -13,7 +14,7 @@ public class ErrorController : ControllerBase
         _logger = logger;
     }
 
-    [Route("/error")]
+    [HttpGet("/error")]
     public IActionResult HandleError()
     {
         var context = HttpContext.Features.Get<IExceptionHandlerFeature>();

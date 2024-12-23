@@ -10,33 +10,42 @@ using ReCaptchaJwtAuth.API.Errors;
 using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using ReCaptchaJwtAuth.API.Persistence.Data;
+using Swashbuckle.AspNetCore.SwaggerUI;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(nameof(JwtSettings)));
-builder.Services.Configure<GoogleReCaptchaV3Settings>(builder.Configuration.GetSection( nameof(GoogleReCaptchaV3Settings)));
+builder.Services.AddControllers();
+builder.Services.AddLogging();
 
+
+// Add services to the container.
+// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddEndpointsApiExplorer();
+
+// Bind and configure settings
+builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(nameof(JwtSettings)));
+builder.Services.Configure<GoogleReCaptchaV3Settings>(builder.Configuration.GetSection(nameof(GoogleReCaptchaV3Settings)));
+
+// Add services
 builder.Services.AddHttpClient<IGoogleReCaptchaService, GoogleReCaptchaService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IAccountService, AccountService>();
 
-builder.Services.AddControllers();
 
-// Replace the default ProblemDetailsFactory with CustomProblemDetailsFactory
+// Add ProblemDetailsFactory
 builder.Services.AddSingleton<ProblemDetailsFactory, CustomProblemDetailsFactory>();
 
-// Configure API Behavior to use ProblemDetails for model validation errors
+// Configure API Behavior for validation errors
 builder.Services.Configure<ApiBehaviorOptions>(options =>
 {
     options.InvalidModelStateResponseFactory = context =>
     {
         var problemDetails = context.HttpContext.RequestServices
             .GetRequiredService<ProblemDetailsFactory>()
-            .CreateValidationProblemDetails(
-                context.HttpContext,
-                context.ModelState);
+            .CreateValidationProblemDetails(context.HttpContext, context.ModelState);
 
         problemDetails.Status = StatusCodes.Status400BadRequest;
-        problemDetails.Title = "One or more validation errors occurred.";
+        problemDetails.Title = "Validation Errors";
 
         return new BadRequestObjectResult(problemDetails)
         {
@@ -45,7 +54,7 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
     };
 });
 
-// Configure rate limiting
+// Add rate limiting
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("LoginPolicy", context =>
@@ -60,13 +69,10 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
-
-// Configure JWT settings
-var jwtSettings = new JwtSettings();
-builder.Configuration.GetSection(nameof(JwtSettings)).Bind(jwtSettings);
+// Configure JWT Authentication
+var jwtSettings = builder.Configuration.GetSection(nameof(JwtSettings)).Get<JwtSettings>();
 var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);
 
-// Configure JWT authentication
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -86,7 +92,7 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Configure Swagger
+// Add Swagger
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
@@ -96,7 +102,6 @@ builder.Services.AddSwaggerGen(options =>
         Description = "An API with JWT Authentication and Google reCAPTCHA"
     });
 
-    // Configure Swagger to use the JWT Bearer token
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -104,7 +109,7 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Enter 'Bearer' [space] and then your token in the text input below.\n\nExample: 'Bearer 12345abcdef'"
+        Description = "Enter 'Bearer' [space] and then your token.\n\nExample: 'Bearer 12345abcdef'"
     });
 
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -118,40 +123,59 @@ builder.Services.AddSwaggerGen(options =>
                     Id = "Bearer"
                 }
             },
-            new string[] {}
+            new string[] { }
         }
     });
 });
 
+// Add DbContext
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-builder.Services.AddScoped<IAccountService, AccountService>();
+// Add Health Checks
+// builder.Services.AddHealthChecks()
+//     .AddSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
 
+// Build the app
 var app = builder.Build();
 
-// Seed database during application startup
+// Seed database during startup
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     DbInitializer.Initialize(services);
 }
 
-// Configure the HTTP request pipeline.
+// Configure the middleware pipeline
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(options =>
+    app.UseSwaggerUI(c =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "ReCaptcha JWT Auth API v1");
-        options.RoutePrefix = string.Empty; // Serve Swagger UI at the app's root
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "ReCaptchaJWTAuthAPIv1");
+        c.DefaultModelRendering(ModelRendering.Example);
+        c.DefaultModelExpandDepth(1);
     });
 }
+else
+{
+    // Enable Swagger for Production (Optional)
+    if (builder.Configuration.GetValue<bool>("EnableSwaggerInProduction"))
+    {
+        app.UseSwaggerUI(c =>
+        {
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "ReCaptchaJWTAuthAPIv1");
+            c.DefaultModelRendering(ModelRendering.Example);
+            c.DefaultModelExpandDepth(1);
+        });
+    }
+}
 
-app.UseExceptionHandler("/error"); // Use a central error handler
+app.UseExceptionHandler("/error"); // Centralized error handling
 
-// Apply rate limiting middleware
-app.UseRateLimiter();
+//app.UseHealthChecks("/health"); // Add health check endpoint
+
+app.UseRateLimiter(); // Apply rate limiting
 
 app.UseAuthentication();
 app.UseAuthorization();

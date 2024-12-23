@@ -8,7 +8,7 @@ namespace ReCaptchaJwtAuth.API.Services;
 
 public interface IAccountService
 {
-    Task<ErrorOr<string>> LoginAsync(string email, string password, string recaptchaToken, string action, CancellationToken cancellationToken);
+    Task<ErrorOr<string>> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
 }
 
 public class AccountService : IAccountService
@@ -28,25 +28,29 @@ public class AccountService : IAccountService
         _jwtTokenService = jwtTokenService;
         _passwordHasher = new PasswordHasher<User>();
     }
+    
+  
 
-    public async Task<ErrorOr<string>> LoginAsync(string email, string password, string recaptchaToken, string action, CancellationToken cancellationToken)
+    public async Task<ErrorOr<string>> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
     {
+        
         // Step 1: Verify reCAPTCHA
-        var reCaptchaResult = await _reCaptchaService.VerifyReCaptchaAsync(recaptchaToken, action, cancellationToken);
-        if (reCaptchaResult.IsError)
+        var reCaptchaResult = await _reCaptchaService.VerifyReCaptchaAsync(request.ReCaptchaToken, request.Action, cancellationToken);
+        
+        if (reCaptchaResult.IsError  && !DebugModeChecker.IsDebugMode())
         {
             return Error.Validation("Recaptcha.Failed", "The reCAPTCHA validation failed.");
         }
 
         // Step 2: Find the user in the database
-        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == request.Email, cancellationToken);
         if (user == null)
         {
             return Error.NotFound("User.NotFound", "User not found.");
         }
 
         // Step 3: Verify password
-        var passwordVerificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
+        var passwordVerificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (passwordVerificationResult != PasswordVerificationResult.Success)
         {
             return Error.Validation("Credentials.Invalid", "Invalid email or password.");

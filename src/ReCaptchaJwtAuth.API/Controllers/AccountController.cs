@@ -21,7 +21,9 @@ public class AccountController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
-        var result = await _accountService.LoginAsync(request.Email, request.Password, request.ReCaptchaToken, "login", cancellationToken);
+        request.Action = "login";
+        
+        var result = await _accountService.LoginAsync(request, cancellationToken);
 
         if (result.IsError)
         {
